@@ -1,0 +1,136 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+}
+
+/* Added custom story circle animations for Instagram-like effects */
+@layer components {
+  /* Smooth rotating animation for story rings */
+  .story-ring-rotate {
+    animation: story-rotate 3s linear infinite;
+  }
+
+  /* Pulse animation for click feedback */
+  .story-pulse {
+    animation: story-pulse 0.6s ease-out;
+  }
+
+  /* Hide scrollbar for story carousel */
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+@layer base {
+  :root {
+    /* Updated design tokens to match modern hotel store design brief */
+    --background: 0 0% 100%; /* #ffffff - Main background color */
+    --foreground: 220 13% 34%; /* #475569 - Main text color */
+    --card: 210 40% 96%; /* #f1f5f9 - Card background color */
+    --card-foreground: 220 13% 34%; /* #475569 - Card text color */
+    --popover: 0 0% 100%; /* #ffffff - Popover background */
+    --popover-foreground: 220 13% 34%; /* #475569 - Popover text */
+    --primary: 262 83% 58%; /* #8b5cf6 - Primary action color */
+    --primary-foreground: 0 0% 100%; /* #ffffff - Primary text on buttons */
+    --secondary: 270 91% 65%; /* #a855f7 - Secondary action color */
+    --secondary-foreground: 0 0% 100%; /* #ffffff - Secondary text on buttons */
+    --muted: 210 40% 96%; /* #f1f5f9 - Muted background color */
+    --muted-foreground: 220 13% 34%; /* #475569 - Muted text */
+    --accent: 270 91% 65%; /* #a855f7 - Accent color for highlights */
+    --accent-foreground: 0 0% 100%; /* #ffffff - Accent text */
+    --destructive: 20 91% 48%; /* #ea580c - Color for destructive actions */
+    --destructive-foreground: 0 0% 100%; /* #ffffff - Text for destructive actions */
+    --border: 214 32% 91%; /* #e2e8f0 - Border color */
+    --input: 210 40% 96%; /* #f1f5f9 - Input field background */
+    --ring: 262 83% 58%; /* #8b5cf6 - Focus ring effect */
+    --chart-1: 262 83% 58%; /* #8b5cf6 - Chart color 1 */
+    --chart-2: 270 91% 65%; /* #a855f7 - Chart color 2 */
+    --chart-3: 20 91% 48%; /* #ea580c - Chart color 3 */
+    --chart-4: 215 16% 47%; /* #4b5563 - Chart color 4 */
+    --chart-5: 0 0% 100%; /* #ffffff - Chart color 5 */
+    --radius: 0.5rem; /* Corner rounding */
+    --sidebar-background: 0 0% 100%; /* #ffffff - Sidebar background */
+    --sidebar-foreground: 220 13% 34%; /* #475569 - Sidebar text */
+    --sidebar-primary: 262 83% 58%; /* #8b5cf6 - Sidebar primary color */
+    --sidebar-primary-foreground: 0 0% 100%; /* #ffffff - Sidebar primary text */
+    --sidebar-accent: 270 91% 65%; /* #a855f7 - Sidebar accent color */
+    --sidebar-accent-foreground: 0 0% 100%; /* #ffffff - Sidebar accent text */
+    --sidebar-border: 214 32% 91%; /* #e2e8f0 - Sidebar border color */
+    --sidebar-ring: 262 83% 58%; /* #8b5cf6 - Sidebar focus ring */
+  }
+  .dark {
+    --background: 220 13% 18%;
+    --foreground: 0 0% 100%;
+    --card: 220 13% 18%;
+    --card-foreground: 0 0% 100%;
+    --popover: 210 40% 98%;
+    --popover-foreground: 0 0% 100%;
+    --primary: 0 0% 100%;
+    --primary-foreground: 0 0% 0%;
+    --secondary: 262 83% 58%; /* Updated to purple */
+    --secondary-foreground: 0 0% 100%;
+    --muted: 210 40% 98%;
+    --muted-foreground: 0 0% 100%;
+    --accent: 262 83% 58%; /* Updated to purple */
+    --accent-foreground: 0 0% 100%;
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 210 40% 98%;
+    --input: 210 40% 98%;
+    --ring: 262 83% 58%; /* Updated to purple */
+    --chart-1: 262 83% 58%; /* Updated to purple */
+    --chart-2: 270 91% 65%; /* Updated to purple */
+    --chart-3: 30 80% 55%;
+    --chart-4: 280 65% 60%;
+    --chart-5: 340 75% 55%;
+    --sidebar-background: 0 0% 0%;
+    --sidebar-foreground: 262 83% 58%; /* Updated to purple */
+    --sidebar-primary: 224 71.4% 4.1%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 262 83% 58%; /* Updated to purple */
+    --sidebar-accent-foreground: 0 0% 100%;
+    --sidebar-border: 210 40% 98%;
+    --sidebar-ring: 262 83% 58%; /* Updated to purple */
+  }
+}
+
+/* Custom keyframe animations for story circles */
+@keyframes story-rotate {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes story-pulse {
+  0% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.1);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+}
