@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { useSearchParams, useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -45,20 +45,26 @@ interface AppliedCoupon {
   final_amount: number
 }
 
+const WHOP_PLAN_IDS = {
+  "6-month-pack": "plan_xxx_6m", // Replace with actual Whop Plan ID from dashboard
+  "12-month-pack": "plan_xxx_12m", // Replace with actual Whop Plan ID from dashboard
+}
+
 export default function CheckoutPage() {
   const searchParams = useSearchParams()
   const router = useRouter()
   const { toast } = useToast()
+  const whopCheckoutRef = useRef<HTMLDivElement>(null)
 
   const [plan, setPlan] = useState<Plan | null>(null)
   const [allPlans, setAllPlans] = useState<Plan[]>([])
   const [availablePlans, setAvailablePlans] = useState<Plan[]>([])
   const [loading, setLoading] = useState(true)
   const [processing, setProcessing] = useState(false)
-  // Added coupon-related state variables
   const [couponCode, setCouponCode] = useState("")
   const [appliedCoupon, setAppliedCoupon] = useState<AppliedCoupon | null>(null)
   const [couponLoading, setCouponLoading] = useState(false)
+  const [showWhopCheckout, setShowWhopCheckout] = useState(false)
   const [userInfo, setUserInfo] = useState({
     firstName: "",
     lastName: "",
@@ -193,6 +199,121 @@ export default function CheckoutPage() {
     checkUserSession()
   }, [planParam])
 
+  useEffect(() => {
+    if (showWhopCheckout && whopCheckoutRef.current && plan) {
+      const planSlug = plan.name.toLowerCase().replace(/[^a-z0-9]/g, "-")
+      const whopPlanId = WHOP_PLAN_IDS[planSlug as keyof typeof WHOP_PLAN_IDS]
+
+      if (!whopPlanId) {
+        console.error("[v0] No Whop Plan ID found for plan:", planSlug)
+        toast({
+          title: "Configuration Error",
+          description: "Payment system not configured for this plan. Please contact support.",
+          variant: "destructive",
+        })
+        return
+      }
+
+      // Load Whop checkout script
+      const script = document.createElement("script")
+      script.src = "https://assets.whop.com/sdk/v3/whop-sdk.js"
+      script.async = true
+      script.onload = () => {
+        // Initialize Whop checkout
+        if (window.Whop) {
+          const finalAmount = appliedCoupon ? appliedCoupon.final_amount : plan.price
+
+          window.Whop.checkout({
+            planId: whopPlanId,
+            email: userInfo.email || undefined,
+            metadata: {
+              hotelName: userInfo.hotelName,
+              firstName: userInfo.firstName,
+              lastName: userInfo.lastName,
+              couponCode: appliedCoupon?.code || "",
+              discountAmount: appliedCoupon?.discount_amount || 0,
+              finalAmount: finalAmount,
+            },
+            onComplete: async (data: any) => {
+              console.log("[v0] Whop checkout completed:", data)
+              await handleWhopCheckoutSuccess(data)
+            },
+            onError: (error: any) => {
+              console.error("[v0] Whop checkout error:", error)
+              toast({
+                title: "Payment Failed",
+                description: "There was an error processing your payment. Please try again.",
+                variant: "destructive",
+              })
+              setShowWhopCheckout(false)
+              setProcessing(false)
+            },
+          })
+        }
+      }
+      document.body.appendChild(script)
+
+      return () => {
+        if (document.body.contains(script)) {
+          document.body.removeChild(script)
+        }
+      }
+    }
+  }, [showWhopCheckout, plan, userInfo, appliedCoupon])
+
+  const handleWhopCheckoutSuccess = async (whopData: any) => {
+    try {
+      setProcessing(true)
+
+      // Call backend to create subscription with Whop payment data
+      const checkoutResponse = await fetch("/api/checkout", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(currentUser?.id && { "user-id": currentUser.id }),
+        },
+        body: JSON.stringify({
+          type: "subscription",
+          planId: plan?.id,
+          userInfo,
+          couponId: appliedCoupon?.code,
+          paymentMethod: "whop",
+          whopPaymentData: whopData,
+        }),
+      })
+
+      const checkoutData = await safeJsonParse(checkoutResponse)
+
+      if (!checkoutData.success) {
+        throw new Error(checkoutData.error || "Checkout failed")
+      }
+
+      if (checkoutData.user) {
+        localStorage.setItem("user", JSON.stringify(checkoutData.user))
+        localStorage.setItem("isNewAccount", "true")
+      }
+
+      toast({
+        title: "Payment Successful!",
+        description: "Your account has been created. Redirecting to dashboard...",
+      })
+
+      setTimeout(() => {
+        router.push("/dashboard?welcome=true&setup=true")
+      }, 2000)
+    } catch (error) {
+      console.error("[v0] Whop checkout success handler error:", error)
+      toast({
+        title: "Error",
+        description: error instanceof Error ? error.message : "Failed to complete checkout",
+        variant: "destructive",
+      })
+    } finally {
+      setProcessing(false)
+      setShowWhopCheckout(false)
+    }
+  }
+
   const validateCoupon = async () => {
     if (!couponCode.trim() || !plan) return
 
@@ -286,9 +407,42 @@ export default function CheckoutPage() {
   const handleCheckout = async () => {
     if (!plan) return
 
+    // Validate required fields
+    if (!isLoggedIn && !isHotelStoreFlow) {
+      if (!userInfo.email || !userInfo.firstName || !userInfo.lastName || !userInfo.hotelName || !userInfo.password) {
+        toast({
+          title: "Missing Information",
+          description: "Please fill in all required fields",
+          variant: "destructive",
+        })
+        return
+      }
+    }
+
     setProcessing(true)
 
     try {
+      const finalPrice = appliedCoupon ? appliedCoupon.final_amount : plan.price
+
+      if (finalPrice > 0 && !isHotelStoreFlow) {
+        const planSlug = plan.name.toLowerCase().replace(/[^a-z0-9]/g, "-")
+        const whopPlanId = WHOP_PLAN_IDS[planSlug as keyof typeof WHOP_PLAN_IDS]
+
+        if (!whopPlanId) {
+          toast({
+            title: "Configuration Error",
+            description: "This plan is not available for purchase yet. Please contact support.",
+            variant: "destructive",
+          })
+          setProcessing(false)
+          return
+        }
+
+        // Show Whop checkout
+        setShowWhopCheckout(true)
+        return
+      }
+
       const checkoutResponse = await fetch("/api/checkout", {
         method: "POST",
         headers: {
@@ -311,7 +465,7 @@ export default function CheckoutPage() {
               ]
             : undefined,
           couponId: appliedCoupon?.code,
-          paymentMethod: "stripe",
+          paymentMethod: "free",
         }),
       })
 
@@ -344,37 +498,27 @@ export default function CheckoutPage() {
           localStorage.setItem("isNewAccount", "true") // Flag for onboarding
         }
 
-        if (checkoutData.checkout.requiresPayment && finalPrice > 0) {
-          // For paid subscriptions, show success and redirect to dashboard
-          toast({
-            title: "Account Created Successfully!",
-            description: "Your account has been created. Redirecting to dashboard to complete setup...",
-          })
+        // Free subscription
+        toast({
+          title: "Welcome to HotelTec!",
+          description: "Your free account has been created. Redirecting to dashboard...",
+        })
 
-          setTimeout(() => {
-            router.push("/dashboard?welcome=true&setup=true")
-          }, 2000)
-        } else {
-          // Free subscription
-          toast({
-            title: "Welcome to HotelTec!",
-            description: "Your free account has been created. Redirecting to dashboard...",
-          })
-
-          setTimeout(() => {
-            router.push("/dashboard?welcome=true&setup=true")
-          }, 1500)
-        }
+        setTimeout(() => {
+          router.push("/dashboard?welcome=true&setup=true")
+        }, 1500)
       }
     } catch (error) {
-      console.error("Checkout error:", error)
+      console.error("[v0] Checkout error:", error)
       toast({
         title: "Checkout Failed",
         description: error instanceof Error ? error.message : "Something went wrong during checkout",
         variant: "destructive",
       })
     } finally {
-      setProcessing(false)
+      if (!showWhopCheckout) {
+        setProcessing(false)
+      }
     }
   }
 
@@ -406,6 +550,33 @@ export default function CheckoutPage() {
 
   return (
     <div className="min-h-screen bg-background py-12 px-4">
+      {showWhopCheckout && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-background rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] overflow-auto">
+            <div className="p-6">
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-2xl font-bold">Complete Your Payment</h2>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    setShowWhopCheckout(false)
+                    setProcessing(false)
+                  }}
+                >
+                  <X className="w-4 h-4" />
+                </Button>
+              </div>
+              <div ref={whopCheckoutRef} id="whop-checkout-container" className="min-h-[400px]">
+                <div className="flex items-center justify-center py-12">
+                  <Loader2 className="w-8 h-8 animate-spin" />
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="container mx-auto max-w-6xl">
         <div className="mb-8">
           <Button variant="ghost" asChild className="mb-4">
@@ -662,8 +833,8 @@ export default function CheckoutPage() {
                         </h4>
                         <div className="p-4 border rounded-lg bg-muted/50">
                           <p className="text-sm text-muted-foreground">
-                            Secure payment processing for your account upgrade. You'll be redirected to complete your
-                            payment.
+                            Secure payment processing powered by Whop. You'll complete your payment in a secure checkout
+                            window.
                           </p>
                         </div>
                       </div>
@@ -678,7 +849,7 @@ export default function CheckoutPage() {
                     {processing ? (
                       <>
                         <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                        {finalPrice === 0 ? "Upgrading..." : "Processing Payment..."}
+                        {finalPrice === 0 ? "Upgrading..." : "Opening Checkout..."}
                       </>
                     ) : finalPrice === 0 ? (
                       "Upgrade to Free Plan"
@@ -764,7 +935,8 @@ export default function CheckoutPage() {
                         </h4>
                         <div className="p-4 border rounded-lg bg-muted/50">
                           <p className="text-sm text-muted-foreground">
-                            Payment processing will be handled securely. You'll be redirected to complete your payment.
+                            Secure payment processing powered by Whop. You'll complete your payment in a secure checkout
+                            window.
                           </p>
                         </div>
                       </div>
@@ -779,7 +951,7 @@ export default function CheckoutPage() {
                     {processing ? (
                       <>
                         <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                        Processing...
+                        {finalPrice === 0 ? "Processing..." : "Opening Checkout..."}
                       </>
                     ) : finalPrice === 0 ? (
                       "Start Free Trial"
@@ -806,4 +978,18 @@ export default function CheckoutPage() {
       </div>
     </div>
   )
+}
+
+declare global {
+  interface Window {
+    Whop?: {
+      checkout: (config: {
+        planId: string
+        email?: string
+        metadata?: Record<string, any>
+        onComplete: (data: any) => void
+        onError: (error: any) => void
+      }) => void
+    }
+  }
 }

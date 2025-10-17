@@ -24,39 +24,20 @@ export async function POST(request: NextRequest) {
       items,
       couponId,
       paymentMethod = "stripe",
+      whopPaymentData,
     } = body
 
     console.log("[v0] Checkout type:", type)
     console.log("[v0] User info:", userInfo)
 
-    // Validate required fields based on checkout type
-    if (type === "subscription") {
-      if (!planId || !userInfo?.email) {
-        return NextResponse.json(
-          { success: false, error: "Missing required fields for subscription checkout" },
-          { status: 400 },
-        )
-      }
-    } else if (type === "hotel_order") {
-      if (!hotelId || !items || !userInfo?.firstName || !userInfo?.lastName) {
-        return NextResponse.json(
-          { success: false, error: "Missing required fields for hotel order checkout" },
-          { status: 400 },
-        )
-      }
-    } else {
-      return NextResponse.json(
-        { success: false, error: 'Invalid checkout type. Must be "subscription" or "hotel_order"' },
-        { status: 400 },
-      )
+    if (whopPaymentData) {
+      console.log("[v0] Whop payment data received:", whopPaymentData)
     }
 
     if (type === "subscription") {
       try {
         console.log("[v0] Processing subscription checkout")
 
-        // Check if email already exists
-        console.log("[v0] Checking if email exists:", userInfo.email)
         const existingUser = await sql`
           SELECT id FROM users WHERE email = ${userInfo.email}
         `
@@ -69,8 +50,6 @@ export async function POST(request: NextRequest) {
           )
         }
 
-        // Get plan details
-        console.log("[v0] Getting plan details for planId:", planId)
         const planResult = await sql`
           SELECT * FROM subscription_plans WHERE id = ${planId}
         `
@@ -84,7 +63,6 @@ export async function POST(request: NextRequest) {
         let finalAmount = plan.price
         console.log("[v0] Plan found:", plan.name, "Price:", plan.price)
 
-        // Apply coupon if provided
         if (couponId) {
           console.log("[v0] Applying coupon:", couponId)
           try {
@@ -107,7 +85,6 @@ export async function POST(request: NextRequest) {
             }
           } catch (couponError) {
             console.error("[v0] Coupon validation error:", couponError)
-            // Continue without coupon if validation fails
           }
         }
 
@@ -122,7 +99,6 @@ export async function POST(request: NextRequest) {
           hotelName: userInfo.hotelName,
         })
 
-        // Create user account with correct column names
         const userResult = await sql`
           INSERT INTO users (
             email, 
@@ -207,9 +183,9 @@ export async function POST(request: NextRequest) {
           VALUES (
             ${user.id},
             ${planId},
-            ${finalAmount === 0 ? "active" : "pending"},
+            ${finalAmount === 0 ? "active" : "active"},
             NOW(),
-            NOW() + INTERVAL '1 month',
+            NOW() + INTERVAL '${plan.duration_months} months',
             ${paymentMethod},
             true,
             NOW(),
@@ -228,6 +204,33 @@ export async function POST(request: NextRequest) {
           WHERE id = ${user.id}
         `
 
+        if (whopPaymentData && finalAmount > 0) {
+          console.log("[v0] Storing Whop payment record...")
+          await sql`
+            INSERT INTO subscription_payments (
+              subscription_id,
+              user_id,
+              amount,
+              currency,
+              payment_method,
+              payment_status,
+              transaction_id,
+              created_at
+            )
+            VALUES (
+              ${subscription.id},
+              ${user.id},
+              ${finalAmount},
+              'USD',
+              'whop',
+              'completed',
+              ${whopPaymentData.id || whopPaymentData.transactionId || `whop_${Date.now()}`},
+              NOW()
+            )
+          `
+          console.log("[v0] Whop payment record stored successfully")
+        }
+
         console.log("[v0] Adding default products...")
         try {
           await sql`
@@ -240,7 +243,6 @@ export async function POST(request: NextRequest) {
           console.log("[v0] Default products added successfully")
         } catch (productError) {
           console.error("[v0] Error adding default products:", productError)
-          // Continue without failing the entire process
         }
 
         console.log("[v0] Subscription checkout completed successfully")
@@ -285,11 +287,8 @@ export async function POST(request: NextRequest) {
           { status: 500 },
         )
       }
-    }
-
-    if (type === "hotel_order") {
+    } else if (type === "hotel_order") {
       try {
-        // Verify hotel exists
         const hotelResult = await sql`
           SELECT id, name FROM hotels WHERE id = ${hotelId}
         `
@@ -301,7 +300,6 @@ export async function POST(request: NextRequest) {
         const hotel = hotelResult[0]
         const totalAmount = items.reduce((sum: number, item: any) => sum + item.price * item.quantity, 0)
 
-        // Create order in transaction
         const orderResult = await sql`
           INSERT INTO orders (
             hotel_id, 
@@ -326,7 +324,6 @@ export async function POST(request: NextRequest) {
 
         const order = orderResult[0]
 
-        // Create order items
         for (const item of items) {
           await sql`
             INSERT INTO order_items (
@@ -361,6 +358,11 @@ export async function POST(request: NextRequest) {
         console.error("Database error in hotel order checkout:", dbError)
         return NextResponse.json({ success: false, error: "Database error during order processing" }, { status: 500 })
       }
+    } else {
+      return NextResponse.json(
+        { success: false, error: 'Invalid checkout type. Must be "subscription" or "hotel_order"' },
+        { status: 400 },
+      )
     }
   } catch (error) {
     console.error("[v0] Checkout API error:", error)
