@@ -201,29 +201,59 @@ export default function CheckoutPage() {
 
   useEffect(() => {
     if (showWhopCheckout && whopCheckoutRef.current && plan) {
+      console.log("[v0] Initializing Whop checkout...")
+
       const planSlug = plan.name.toLowerCase().replace(/[^a-z0-9]/g, "-")
       const whopPlanId = WHOP_PLAN_IDS[planSlug as keyof typeof WHOP_PLAN_IDS]
 
-      if (!whopPlanId) {
-        console.error("[v0] No Whop Plan ID found for plan:", planSlug)
+      console.log("[v0] Plan slug:", planSlug)
+      console.log("[v0] Whop Plan ID:", whopPlanId)
+
+      if (!whopPlanId || whopPlanId.includes("xxx")) {
+        console.error("[v0] Invalid Whop Plan ID:", whopPlanId)
         toast({
           title: "Configuration Error",
-          description: "Payment system not configured for this plan. Please contact support.",
+          description:
+            "Payment system not configured. Please update WHOP_PLAN_IDS with your actual plan IDs from Whop dashboard.",
           variant: "destructive",
         })
+        setShowWhopCheckout(false)
+        setProcessing(false)
         return
       }
 
-      // Load Whop checkout script
       const script = document.createElement("script")
       script.src = "https://assets.whop.com/sdk/v3/whop-sdk.js"
       script.async = true
+
       script.onload = () => {
-        // Initialize Whop checkout
-        if (window.Whop) {
+        console.log("[v0] Whop SDK loaded successfully")
+
+        // Check if Whop is available
+        if (typeof window.Whop === "undefined") {
+          console.error("[v0] Whop SDK not available after script load")
+          toast({
+            title: "Payment System Error",
+            description: "Failed to load payment system. Please refresh and try again.",
+            variant: "destructive",
+          })
+          setShowWhopCheckout(false)
+          setProcessing(false)
+          return
+        }
+
+        try {
           const finalAmount = appliedCoupon ? appliedCoupon.final_amount : plan.price
 
-          window.Whop.checkout({
+          console.log("[v0] Creating Whop checkout with config:", {
+            planId: whopPlanId,
+            email: userInfo.email,
+            finalAmount,
+          })
+
+          // Initialize Whop checkout in the container
+          window.Whop.createCheckout({
+            element: whopCheckoutRef.current!,
             planId: whopPlanId,
             email: userInfo.email || undefined,
             metadata: {
@@ -234,23 +264,46 @@ export default function CheckoutPage() {
               discountAmount: appliedCoupon?.discount_amount || 0,
               finalAmount: finalAmount,
             },
-            onComplete: async (data: any) => {
-              console.log("[v0] Whop checkout completed:", data)
+            onPaymentSuccess: async (data: any) => {
+              console.log("[v0] Whop payment success:", data)
               await handleWhopCheckoutSuccess(data)
             },
             onError: (error: any) => {
               console.error("[v0] Whop checkout error:", error)
               toast({
                 title: "Payment Failed",
-                description: "There was an error processing your payment. Please try again.",
+                description: error?.message || "There was an error processing your payment. Please try again.",
                 variant: "destructive",
               })
               setShowWhopCheckout(false)
               setProcessing(false)
             },
           })
+
+          console.log("[v0] Whop checkout initialized successfully")
+        } catch (error) {
+          console.error("[v0] Error initializing Whop checkout:", error)
+          toast({
+            title: "Checkout Error",
+            description: "Failed to initialize payment. Please try again.",
+            variant: "destructive",
+          })
+          setShowWhopCheckout(false)
+          setProcessing(false)
         }
       }
+
+      script.onerror = () => {
+        console.error("[v0] Failed to load Whop SDK script")
+        toast({
+          title: "Connection Error",
+          description: "Failed to connect to payment system. Please check your internet connection and try again.",
+          variant: "destructive",
+        })
+        setShowWhopCheckout(false)
+        setProcessing(false)
+      }
+
       document.body.appendChild(script)
 
       return () => {
@@ -567,9 +620,11 @@ export default function CheckoutPage() {
                   <X className="w-4 h-4" />
                 </Button>
               </div>
-              <div ref={whopCheckoutRef} id="whop-checkout-container" className="min-h-[400px]">
-                <div className="flex items-center justify-center py-12">
-                  <Loader2 className="w-8 h-8 animate-spin" />
+              <div ref={whopCheckoutRef} id="whop-checkout-container" className="min-h-[500px] w-full">
+                {/* Loading state shown while Whop initializes */}
+                <div className="flex flex-col items-center justify-center py-12 gap-4">
+                  <Loader2 className="w-8 h-8 animate-spin text-primary" />
+                  <p className="text-sm text-muted-foreground">Loading secure checkout...</p>
                 </div>
               </div>
             </div>
@@ -983,11 +1038,12 @@ export default function CheckoutPage() {
 declare global {
   interface Window {
     Whop?: {
-      checkout: (config: {
+      createCheckout: (config: {
+        element: HTMLElement
         planId: string
         email?: string
         metadata?: Record<string, any>
-        onComplete: (data: any) => void
+        onPaymentSuccess: (data: any) => void
         onError: (error: any) => void
       }) => void
     }
